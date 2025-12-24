@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SPP Triage Monitor
 // @namespace    https://github.com/scahmi/spp-triage-monitor
-// @version      1.0.3
-// @description  Auto monitor SPP triage, reset polling, Telegram alerts
+// @version      1.1.0
+// @description  Auto monitor SPP triage, reset polling, Telegram alerts (Level 4 & 5 only)
 // @author       ETD HPG
 // @match        https://hpgspp.emrai.my/spp/*
 // @grant        GM_xmlhttpRequest
@@ -14,30 +14,31 @@
 (function () {
     'use strict';
 
-    // ===== SETTINGS =====
-    const interval = 15000;       // how often to press Reset (ms)
-    const updateDelay = 1200;     // wait after Reset click
-    let oldCount = null;
+    /* ================= SETTINGS ================= */
+    const interval = 15000;       // Reset click interval
+    const updateDelay = 1200;     // Wait after Reset
     let running = true;
 
-    // ===== TELEGRAM =====
+    // Track known patients (deduplication)
+    let knownPatients = new Set();
+
+    /* ================= TELEGRAM ================= */
     const TELEGRAM_BOT_TOKEN = "8551613313:AAHDkj9A0V6iLFsoQ0yJzLBh1Cgac-7tTts";
     const TELEGRAM_CHAT_ID  = "-1003658002044";
 
     const alarmSound = "https://actions.google.com/sounds/v1/alarms/beep_short.ogg";
     const beep = new Audio(alarmSound);
 
-    // ===== REQUEST NOTIFICATION PERMISSION =====
     if (Notification.permission !== "granted") {
         Notification.requestPermission();
     }
 
-    // ===== STATUS BAR (BOTTOM LEFT, SYSTEM FONT) =====
+    /* ================= STATUS BAR ================= */
     let statusBox;
 
     function formatDate(d) {
         const pad = n => n.toString().padStart(2, "0");
-        return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear().toString().slice(-2)} ` +
+        return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear().toString().slice(-2)} ` +
                `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
 
@@ -45,7 +46,12 @@
         if (!statusBox) return;
 
         statusBox.innerHTML = `
-            <div><strong>Monitoring Status:</strong> ${isRunning ? "Monitoring" : "Not monitoring"}</div>
+            <div>
+                <strong>Monitoring Status:</strong>
+                <span style="color:${isRunning ? "#2e7d32" : "#777"};font-weight:600">
+                    ${isRunning ? "Monitoring" : "Not monitoring"}
+                </span>
+            </div>
             <div><strong>Last Update:</strong> ${lastUpdate}</div>
         `;
     }
@@ -64,7 +70,7 @@
             borderRadius: "8px",
             fontSize: "13px",
             lineHeight: "1.4",
-            minWidth: "230px",
+            minWidth: "260px",
             boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
             fontFamily: `
                 system-ui,
@@ -82,7 +88,7 @@
         updateStatus(true, "-");
     }
 
-    // ===== TELEGRAM SEND FUNCTION =====
+    /* ================= TELEGRAM SEND ================= */
     function sendTelegram(msg) {
         GM_xmlhttpRequest({
             method: "POST",
@@ -95,7 +101,55 @@
         });
     }
 
-    // ===== WAIT FOR RESET BUTTON =====
+    /* ================= EXTRACTION LOGIC ================= */
+
+    function extractPatients() {
+        const rows = document.querySelectorAll("table tbody tr");
+        const patients = [];
+
+        rows.forEach(row => {
+            const cells = row.querySelectorAll("td");
+            if (cells.length < 3) return;
+
+            // ----- TRIAGE CATEGORY (Column 1) -----
+            const triageText = cells[1].innerText.trim(); // e.g. LEVEL 5 - Routine care
+            const triageMatch = triageText.match(/level\s*(\d)/i);
+            if (!triageMatch) return;
+
+            const triageLevel = `Level ${triageMatch[1]}`;
+
+            // ----- NAME + IDENTIFICATION (Column 2) -----
+            const identityText = cells[2].innerText.trim();
+            const lines = identityText.split("\n").map(l => l.trim());
+
+            const name = lines[0] || "UNKNOWN";
+
+            // NRIC = 12 digits
+            const nricMatch = identityText.match(/\b\d{12}\b/);
+            const rawNRIC = nricMatch ? nricMatch[0] : "UNKNOWN";
+
+            const maskedNRIC = rawNRIC !== "UNKNOWN"
+                ? rawNRIC.replace(/(\d{6})(\d{2})\d{4}/, "$1-$2-XXXX")
+                : "UNKNOWN";
+
+            const signature = `${name}|${rawNRIC}|${triageLevel}`;
+
+            patients.push({
+                name,
+                nric: maskedNRIC,
+                triage: triageLevel,
+                signature
+            });
+        });
+
+        return patients;
+    }
+
+    function shouldNotify(triageLevel) {
+        return triageLevel === "Level 4" || triageLevel === "Level 5";
+    }
+
+    /* ================= RESET HANDLING ================= */
     function waitForReset(cb) {
         const t = setInterval(() => {
             const btn = document.getElementById("Reset");
@@ -106,47 +160,12 @@
         }, 500);
     }
 
-    // ===== CLICK RESET BUTTON =====
     function clickResetButton() {
         const btn = document.getElementById("Reset");
         if (btn) btn.click();
     }
 
-    // ===== COUNT TABLE ROWS =====
-    function getRowCount() {
-        return document.querySelectorAll("table tbody tr").length;
-    }
-
-    // ===== ALERT WHEN NEW PATIENT =====
-    function alertNewPatient(newCount) {
-        beep.play().catch(() => {});
-
-        if (Notification.permission === "granted") {
-            new Notification("⚠️ New Patient Registered", {
-                body: "A new patient has appeared in the triage list."
-            });
-        }
-
-        sendTelegram(
-            `⚠️ SPP TRIAGE ALERT\n` +
-            `New patient registered.\n` +
-            `Total patients: ${newCount}\n` +
-            `Time: ${new Date().toLocaleString()}`
-        );
-
-        let flashing = true;
-        const flashInterval = setInterval(() => {
-            document.title = flashing ? "⚠️ NEW PATIENT!" : "Triage Dashboard";
-            flashing = !flashing;
-        }, 600);
-
-        setTimeout(() => {
-            clearInterval(flashInterval);
-            document.title = "Triage Dashboard";
-        }, 10000);
-    }
-
-    // ===== MAIN MONITOR LOOP =====
+    /* ================= MAIN LOOP ================= */
     function monitor() {
         if (!running) {
             updateStatus(false);
@@ -156,19 +175,30 @@
         clickResetButton();
 
         setTimeout(() => {
-            if (!running) {
-                updateStatus(false);
-                return;
-            }
-
-            const newCount = getRowCount();
+            const patients = extractPatients();
             const now = formatDate(new Date());
 
-            if (oldCount !== null && newCount > oldCount) {
-                alertNewPatient(newCount);
-            }
+            patients.forEach(p => {
+                if (!knownPatients.has(p.signature)) {
 
-            oldCount = newCount;
+                    // Skip baseline
+                    if (knownPatients.size > 0 && shouldNotify(p.triage)) {
+                        beep.play().catch(()=>{});
+
+                        sendTelegram(
+                            `⚠️ SPP TRIAGE ALERT ⚠️\n` +
+                            `New patient registered\n` +
+                            `Time: ${new Date().toLocaleString()}\n` +
+                            `Name: ${p.name}\n` +
+                            `NRIC: ${p.nric}\n` +
+                            `Triage Category : ${p.triage}`
+                        );
+                    }
+
+                    knownPatients.add(p.signature);
+                }
+            });
+
             updateStatus(true, now);
 
         }, updateDelay);
@@ -176,7 +206,7 @@
         setTimeout(monitor, interval);
     }
 
-    // ===== START =====
+    /* ================= START ================= */
     waitForReset(() => {
         createStatusBox();
         monitor();
