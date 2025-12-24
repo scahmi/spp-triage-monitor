@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SPP Patient Monitor (Stable)
 // @namespace    https://github.com/scahmi/spp-triage-monitor
-// @version      3.0.0
+// @version      3.0.1
 // @description  Notify Telegram + sound when new patient appears (no triage)
 // @match        https://hpgspp.emrai.my/spp/*
 // @grant        GM_xmlhttpRequest
@@ -10,6 +10,11 @@
 
 (function () {
     'use strict';
+
+    /* ===== RUN ONLY ON TRIAGE ASSESSMENT VIEW ===== */
+    if (location.hash !== "#!TriageAssessmentView") {
+        return;
+    }
 
     /* ================= CONFIG ================= */
     const INTERVAL = 15000;
@@ -26,16 +31,19 @@
     );
 
     /* ================= UNLOCK SOUND ================= */
-    document.addEventListener("click", () => {
-        beep.play().catch(()=>{});
-    }, { once: true });
+    document.addEventListener(
+        "click",
+        () => {
+            beep.play().catch(() => {});
+        },
+        { once: true }
+    );
 
     /* ================= STATUS BAR ================= */
     let statusBox;
 
     function nowStr() {
-        const d = new Date();
-        return d.toLocaleString();
+        return new Date().toLocaleString();
     }
 
     function createStatusBox() {
@@ -50,9 +58,11 @@
             border: "1px solid rgba(0,0,0,0.15)",
             borderRadius: "8px",
             fontSize: "13px",
-            fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
+            fontFamily:
+                "system-ui, -apple-system, Segoe UI, Roboto, Arial",
             boxShadow: "0 2px 6px rgba(0,0,0,0.2)"
         });
+
         document.body.appendChild(statusBox);
         updateStatus("-");
     }
@@ -90,13 +100,15 @@
 
         // NRIC: 12 digits
         if (/^\d{12}$/.test(value)) {
-            return `${value.slice(0,8)}XXXX (${type})`;
+            return `${value.slice(0, 8)}XXXX (${type})`;
         }
 
         // Passport
         if (/passport/i.test(type) && value.length >= 6) {
             const keep = Math.ceil(value.length / 2);
-            return `${value.slice(0, keep)}${"X".repeat(value.length - keep)} (${type})`;
+            return `${value.slice(0, keep)}${"X".repeat(
+                value.length - keep
+            )} (${type})`;
         }
 
         return raw;
@@ -115,65 +127,5 @@
 
             const name = nameEl.innerText.trim();
 
-            const m = labelEl.innerText.match(/\|\s*([^|]+?\([^)]+\))/);
-            const id = m ? maskID(m[1].trim()) : "UNKNOWN";
-
-            patients.push({
-                name,
-                id,
-                signature: `${name}|${id}`
-            });
-        });
-
-        return patients;
-    }
-
-    /* ================= RESET HANDLING ================= */
-    function clickReset() {
-        const btn = document.getElementById("Reset");
-        if (btn) btn.click();
-    }
-
-    /* ================= MAIN LOOP ================= */
-    function loop() {
-        clickReset();
-
-        setTimeout(() => {
-            const patients = extractPatients();
-            const now = nowStr();
-
-            patients.forEach(p => {
-                if (!knownPatients.has(p.signature)) {
-
-                    // ALERT IMMEDIATELY
-                    beep.play().catch(()=>{});
-
-                    sendTelegram(
-                        `⚠️ SPP PATIENT ALERT ⚠️\n` +
-                        `New patient registered\n` +
-                        `Time: ${now}\n` +
-                        `Name: ${p.name}\n` +
-                        `ID: ${p.id}`
-                    );
-
-                    knownPatients.add(p.signature);
-                }
-            });
-
-            updateStatus(now);
-
-        }, UPDATE_DELAY);
-
-        setTimeout(loop, INTERVAL);
-    }
-
-    /* ================= START ================= */
-    const wait = setInterval(() => {
-        if (document.getElementById("Reset")) {
-            clearInterval(wait);
-            createStatusBox();
-            loop();
-        }
-    }, 500);
-
-})();
+            const m = labelEl.innerText.match(
+                /\|\s*([^|]+?\([^)]+\))/*
