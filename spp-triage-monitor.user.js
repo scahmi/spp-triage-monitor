@@ -15,8 +15,7 @@
     const INTERVAL = 15000;
     const UPDATE_DELAY = 1200;
 
-    const TELEGRAM_BOT_TOKEN = "8551613313:AAHDkj9A0V6iLFsoQ0yJzLBh1Cgac-7tTts
-";
+    const TELEGRAM_BOT_TOKEN = "8551613313:AAHDkj9A0V6iLFsoQ0yJzLBh1Cgac-7tTts";
     const TELEGRAM_CHAT_ID  = "-1003658002044";
 
     /* ================= STATE ================= */
