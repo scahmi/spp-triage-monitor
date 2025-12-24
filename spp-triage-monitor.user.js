@@ -1,9 +1,8 @@
 // ==UserScript==
-// @name         SPP Triage Monitor
+// @name         SPP Triage Monitor (Stable Mode)
 // @namespace    https://github.com/scahmi/spp-triage-monitor
-// @version      1.1.3
-// @description  Monitor SPP triage and notify Telegram for Level 4 & 5
-// @author       ETD HPG
+// @version      2.0.1
+// @description  Notify when new patient appears in SPP triage (stable, no triage filter)
 // @match        https://hpgspp.emrai.my/spp/*
 // @grant        GM_xmlhttpRequest
 // @run-at       document-start
@@ -12,14 +11,11 @@
 (function () {
     'use strict';
 
-    /* ================= SETTINGS ================= */
     const INTERVAL = 15000;
     const UPDATE_DELAY = 1200;
 
     let knownPatients = new Set();
-    let running = true;
 
-    /* ================= TELEGRAM ================= */
     const TELEGRAM_BOT_TOKEN = "8551613313:AAHDkj9A0V6iLFsoQ0yJzLBh1Cgac-7tTts";
     const TELEGRAM_CHAT_ID  = "-1003658002044";
 
@@ -38,36 +34,30 @@
 
     function createStatusBox() {
         statusBox = document.createElement("div");
-        Object.assign(statusBox.style, {
-            position: "fixed",
-            bottom: "20px",
-            left: "20px",
-            zIndex: "999999",
-            padding: "10px 14px",
-            background: "#fff",
-            border: "1px solid rgba(0,0,0,.12)",
-            borderRadius: "8px",
-            fontSize: "13px",
-            boxShadow: "0 2px 6px rgba(0,0,0,.15)",
-            fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial"
-        });
+        statusBox.style = `
+            position:fixed;
+            bottom:20px;
+            left:20px;
+            background:#fff;
+            border:1px solid #ccc;
+            padding:10px;
+            border-radius:8px;
+            font-family:system-ui;
+            font-size:13px;
+            z-index:999999;
+        `;
         document.body.appendChild(statusBox);
-        updateStatus("-", true);
+        updateStatus("-");
     }
 
-    function updateStatus(lastUpdate, ok) {
+    function updateStatus(time) {
         statusBox.innerHTML = `
-            <div>
-                <strong>Monitoring Status:</strong>
-                <span style="color:${ok ? "#2e7d32" : "#999"};font-weight:600">
-                    ${ok ? "Monitoring" : "Not monitoring"}
-                </span>
-            </div>
-            <div><strong>Last Update:</strong> ${lastUpdate}</div>
+            <div><b>Monitoring Status:</b> <span style="color:#2e7d32">Monitoring</span></div>
+            <div><b>Last Update:</b> ${time}</div>
         `;
     }
 
-    /* ================= TELEGRAM SEND ================= */
+    /* ================= TELEGRAM ================= */
     function sendTelegram(msg) {
         GM_xmlhttpRequest({
             method: "POST",
@@ -108,31 +98,20 @@
         const patients = [];
 
         rows.forEach(row => {
-            // ---- TRIAGE LEVEL (SPAN SCAN) ----
-            let level = null;
-            row.querySelectorAll("span").forEach(s => {
-                const m = s.textContent.match(/LEVEL\s*(4|5)\b/i);
-                if (m) level = m[1];
-            });
-            if (!level) return;
-
-            // ---- NAME ----
             const nameEl = row.querySelector(".v-button-caption");
-            const name = nameEl ? nameEl.textContent.trim() : "UNKNOWN";
+            const labelEl = row.querySelector(".v-label");
 
-            // ---- ID ----
-            let id = "UNKNOWN";
-            row.querySelectorAll(".v-label").forEach(lbl => {
-                const m = lbl.textContent.match(/\|\s*([^|]+?\([^)]+\))/);
-                if (m) id = maskID(m[1].trim());
-            });
+            if (!nameEl || !labelEl) return;
 
-            const signature = `${name}|${id}|${level}`;
+            const name = nameEl.innerText.trim();
+
+            const m = labelEl.innerText.match(/\|\s*([^|]+?\([^)]+\))/);
+            const id = m ? maskID(m[1].trim()) : "UNKNOWN";
+
             patients.push({
                 name,
                 id,
-                triage: `Level ${level}`,
-                signature
+                signature: `${name}|${id}`
             });
         });
 
@@ -145,26 +124,14 @@
         if (btn) btn.click();
     }
 
-    function waitForReset(cb) {
-        const t = setInterval(() => {
-            if (document.getElementById("Reset")) {
-                clearInterval(t);
-                cb();
-            }
-        }, 500);
-    }
-
-    /* ================= MAIN LOOP ================= */
     function loop() {
-        if (!running) return;
-
         clickReset();
 
         setTimeout(() => {
-            const found = extractPatients();
+            const patients = extractPatients();
             const now = formatDate(new Date());
 
-            found.forEach(p => {
+            patients.forEach(p => {
                 if (!knownPatients.has(p.signature)) {
                     if (knownPatients.size > 0) {
                         beep.play().catch(()=>{});
@@ -173,24 +140,25 @@
                             `New patient registered\n` +
                             `Time: ${new Date().toLocaleString()}\n` +
                             `Name: ${p.name}\n` +
-                            `ID: ${p.id}\n` +
-                            `Triage Category : ${p.triage}`
+                            `ID: ${p.id}`
                         );
                     }
                     knownPatients.add(p.signature);
                 }
             });
 
-            updateStatus(now, true);
+            updateStatus(now);
         }, UPDATE_DELAY);
 
         setTimeout(loop, INTERVAL);
     }
 
-    /* ================= START ================= */
-    waitForReset(() => {
-        createStatusBox();
-        loop();
-    });
+    const wait = setInterval(() => {
+        if (document.getElementById("Reset")) {
+            clearInterval(wait);
+            createStatusBox();
+            loop();
+        }
+    }, 500);
 
 })();
