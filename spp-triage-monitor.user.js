@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         SPP Triage Monitor (Stable Mode)
+// @name         SPP Patient Monitor (Stable)
 // @namespace    https://github.com/scahmi/spp-triage-monitor
-// @version      2.0.1
-// @description  Notify when new patient appears in SPP triage (stable, no triage filter)
+// @version      3.0.0
+// @description  Notify Telegram + sound when new patient appears (no triage)
 // @match        https://hpgspp.emrai.my/spp/*
 // @grant        GM_xmlhttpRequest
 // @run-at       document-start
@@ -11,49 +11,60 @@
 (function () {
     'use strict';
 
+    /* ================= CONFIG ================= */
     const INTERVAL = 15000;
     const UPDATE_DELAY = 1200;
 
-    let knownPatients = new Set();
-
-    const TELEGRAM_BOT_TOKEN = "8551613313:AAHDkj9A0V6iLFsoQ0yJzLBh1Cgac-7tTts";
+    const TELEGRAM_BOT_TOKEN = "8551613313:AAHDkj9A0V6iLFsoQ0yJzLBh1Cgac-7tTts
+";
     const TELEGRAM_CHAT_ID  = "-1003658002044";
+
+    /* ================= STATE ================= */
+    let knownPatients = new Set();
 
     const beep = new Audio(
         "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
     );
 
+    /* ================= UNLOCK SOUND ================= */
+    document.addEventListener("click", () => {
+        beep.play().catch(()=>{});
+    }, { once: true });
+
     /* ================= STATUS BAR ================= */
     let statusBox;
 
-    function formatDate(d) {
-        const p = n => n.toString().padStart(2, "0");
-        return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear().toString().slice(-2)} ` +
-               `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    function nowStr() {
+        const d = new Date();
+        return d.toLocaleString();
     }
 
     function createStatusBox() {
         statusBox = document.createElement("div");
-        statusBox.style = `
-            position:fixed;
-            bottom:20px;
-            left:20px;
-            background:#fff;
-            border:1px solid #ccc;
-            padding:10px;
-            border-radius:8px;
-            font-family:system-ui;
-            font-size:13px;
-            z-index:999999;
-        `;
+        Object.assign(statusBox.style, {
+            position: "fixed",
+            bottom: "20px",
+            left: "20px",
+            zIndex: 999999,
+            padding: "10px 14px",
+            background: "#fff",
+            border: "1px solid rgba(0,0,0,0.15)",
+            borderRadius: "8px",
+            fontSize: "13px",
+            fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.2)"
+        });
         document.body.appendChild(statusBox);
         updateStatus("-");
     }
 
     function updateStatus(time) {
         statusBox.innerHTML = `
-            <div><b>Monitoring Status:</b> <span style="color:#2e7d32">Monitoring</span></div>
-            <div><b>Last Update:</b> ${time}</div>
+            <div>
+                <strong>Monitoring Status:</strong>
+                <span style="color:#2e7d32;font-weight:600">Monitoring</span>
+            </div>
+            <div><strong>Last Update:</strong> ${time}</div>
         `;
     }
 
@@ -71,12 +82,12 @@
     }
 
     /* ================= ID MASKING ================= */
-    function maskID(idText) {
-        const m = idText.match(/^(.+?)\s*\(([^)]+)\)$/);
-        if (!m) return idText;
+    function maskID(raw) {
+        const m = raw.match(/^(.+?)\s*\(([^)]+)\)$/);
+        if (!m) return raw;
 
         const value = m[1].trim();
-        const type = m[2].trim();
+        const type  = m[2].trim();
 
         // NRIC: 12 digits
         if (/^\d{12}$/.test(value)) {
@@ -89,16 +100,16 @@
             return `${value.slice(0, keep)}${"X".repeat(value.length - keep)} (${type})`;
         }
 
-        return idText;
+        return raw;
     }
 
-    /* ================= EXTRACTION ================= */
+    /* ================= DATA EXTRACTION ================= */
     function extractPatients() {
         const rows = document.querySelectorAll("table tbody tr");
         const patients = [];
 
         rows.forEach(row => {
-            const nameEl = row.querySelector(".v-button-caption");
+            const nameEl  = row.querySelector(".v-button-caption");
             const labelEl = row.querySelector(".v-label");
 
             if (!nameEl || !labelEl) return;
@@ -118,41 +129,46 @@
         return patients;
     }
 
-    /* ================= RESET ================= */
+    /* ================= RESET HANDLING ================= */
     function clickReset() {
         const btn = document.getElementById("Reset");
         if (btn) btn.click();
     }
 
+    /* ================= MAIN LOOP ================= */
     function loop() {
         clickReset();
 
         setTimeout(() => {
             const patients = extractPatients();
-            const now = formatDate(new Date());
+            const now = nowStr();
 
             patients.forEach(p => {
                 if (!knownPatients.has(p.signature)) {
-                    if (knownPatients.size > 0) {
-                        beep.play().catch(()=>{});
-                        sendTelegram(
-                            `⚠️ SPP TRIAGE ALERT ⚠️\n` +
-                            `New patient registered\n` +
-                            `Time: ${new Date().toLocaleString()}\n` +
-                            `Name: ${p.name}\n` +
-                            `ID: ${p.id}`
-                        );
-                    }
+
+                    // ALERT IMMEDIATELY
+                    beep.play().catch(()=>{});
+
+                    sendTelegram(
+                        `⚠️ SPP PATIENT ALERT ⚠️\n` +
+                        `New patient registered\n` +
+                        `Time: ${now}\n` +
+                        `Name: ${p.name}\n` +
+                        `ID: ${p.id}`
+                    );
+
                     knownPatients.add(p.signature);
                 }
             });
 
             updateStatus(now);
+
         }, UPDATE_DELAY);
 
         setTimeout(loop, INTERVAL);
     }
 
+    /* ================= START ================= */
     const wait = setInterval(() => {
         if (document.getElementById("Reset")) {
             clearInterval(wait);
