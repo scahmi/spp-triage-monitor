@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SPP Triage Monitor
 // @namespace    https://github.com/scahmi/spp-triage-monitor
-// @version      1.1.1
+// @version      1.1.2
 // @description  Auto monitor SPP triage, Telegram alerts for Level 4 & 5
 // @author       ETD HPG
 // @match        https://hpgspp.emrai.my/spp/*
@@ -21,7 +21,7 @@
     let knownPatients = new Set();
 
     /* ================= TELEGRAM ================= */
-    const TELEGRAM_BOT_TOKEN = "PUT_NEW_BOT_TOKEN_HERE";
+    const TELEGRAM_BOT_TOKEN = "8551613313:AAHDkj9A0V6iLFsoQ0yJzLBh1Cgac-7tTts";
     const TELEGRAM_CHAT_ID  = "-1003658002044";
 
     const beep = new Audio(
