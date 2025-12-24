@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SPP Triage Monitor
 // @namespace    https://github.com/scahmi/spp-triage-monitor
-// @version      1.1.0
-// @description  Auto monitor SPP triage, reset polling, Telegram alerts (Level 4 & 5 only)
+// @version      1.1.1
+// @description  Auto monitor SPP triage, Telegram alerts for Level 4 & 5
 // @author       ETD HPG
 // @match        https://hpgspp.emrai.my/spp/*
 // @grant        GM_xmlhttpRequest
@@ -15,19 +15,18 @@
     'use strict';
 
     /* ================= SETTINGS ================= */
-    const interval = 15000;       // Reset click interval
-    const updateDelay = 1200;     // Wait after Reset
+    const interval = 15000;
+    const updateDelay = 1200;
     let running = true;
-
-    // Track known patients (deduplication)
     let knownPatients = new Set();
 
     /* ================= TELEGRAM ================= */
-    const TELEGRAM_BOT_TOKEN = "8551613313:AAHDkj9A0V6iLFsoQ0yJzLBh1Cgac-7tTts";
+    const TELEGRAM_BOT_TOKEN = "PUT_NEW_BOT_TOKEN_HERE";
     const TELEGRAM_CHAT_ID  = "-1003658002044";
 
-    const alarmSound = "https://actions.google.com/sounds/v1/alarms/beep_short.ogg";
-    const beep = new Audio(alarmSound);
+    const beep = new Audio(
+        "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
+    );
 
     if (Notification.permission !== "granted") {
         Notification.requestPermission();
@@ -101,52 +100,75 @@
         });
     }
 
-    /* ================= EXTRACTION LOGIC ================= */
+    /* ================= ID MASKING ================= */
+    function maskID(idText) {
+        const m = idText.match(/^(.+?)\s*\(([^)]+)\)$/);
+        if (!m) return idText;
 
+        const value = m[1].trim();
+        const type = m[2].trim();
+
+        // NRIC → 12 digits
+        if (/^\d{12}$/.test(value)) {
+            const masked = value.replace(/(\d{8})\d{4}/, "$1XXXX");
+            return `${masked} (${type})`;
+        }
+
+        // Passport → alphanumeric
+        if (/passport/i.test(type) && value.length >= 6) {
+            const keep = Math.ceil(value.length / 2);
+            const masked =
+                value.slice(0, keep) + "X".repeat(value.length - keep);
+            return `${masked} (${type})`;
+        }
+
+        return idText;
+    }
+
+    /* ================= DATA EXTRACTION ================= */
     function extractPatients() {
         const rows = document.querySelectorAll("table tbody tr");
         const patients = [];
 
         rows.forEach(row => {
-            const cells = row.querySelectorAll("td");
-            if (cells.length < 3) return;
 
-            // ----- TRIAGE CATEGORY (Column 1) -----
-            const triageText = cells[1].innerText.trim(); // e.g. LEVEL 5 - Routine care
-            const triageMatch = triageText.match(/level\s*(\d)/i);
-            if (!triageMatch) return;
+            // ----- TRIAGE LEVEL -----
+            let triageText = null;
+            row.querySelectorAll("span").forEach(s => {
+                const t = s.innerText.trim();
+                if (/^LEVEL\s*\d/i.test(t)) triageText = t;
+            });
+            if (!triageText) return;
 
-            const triageLevel = `Level ${triageMatch[1]}`;
+            const levelMatch = triageText.match(/LEVEL\s*(\d)/i);
+            if (!levelMatch) return;
 
-            // ----- NAME + IDENTIFICATION (Column 2) -----
-            const identityText = cells[2].innerText.trim();
-            const lines = identityText.split("\n").map(l => l.trim());
+            const levelNum = parseInt(levelMatch[1], 10);
+            if (![4, 5].includes(levelNum)) return;
 
-            const name = lines[0] || "UNKNOWN";
+            // ----- NAME -----
+            const nameEl = row.querySelector(".v-button-caption");
+            const name = nameEl ? nameEl.innerText.trim() : "UNKNOWN";
 
-            // NRIC = 12 digits
-            const nricMatch = identityText.match(/\b\d{12}\b/);
-            const rawNRIC = nricMatch ? nricMatch[0] : "UNKNOWN";
+            // ----- ID -----
+            let idText = "UNKNOWN";
+            row.querySelectorAll(".v-label").forEach(lbl => {
+                const t = lbl.innerText;
+                const m = t.match(/\|\s*([^|]+?\([^)]+\))/);
+                if (m) idText = maskID(m[1].trim());
+            });
 
-            const maskedNRIC = rawNRIC !== "UNKNOWN"
-                ? rawNRIC.replace(/(\d{6})(\d{2})\d{4}/, "$1-$2-XXXX")
-                : "UNKNOWN";
-
-            const signature = `${name}|${rawNRIC}|${triageLevel}`;
+            const signature = `${name}|${idText}|Level ${levelNum}`;
 
             patients.push({
                 name,
-                nric: maskedNRIC,
-                triage: triageLevel,
+                id: idText,
+                triage: `Level ${levelNum}`,
                 signature
             });
         });
 
         return patients;
-    }
-
-    function shouldNotify(triageLevel) {
-        return triageLevel === "Level 4" || triageLevel === "Level 5";
     }
 
     /* ================= RESET HANDLING ================= */
@@ -181,8 +203,7 @@
             patients.forEach(p => {
                 if (!knownPatients.has(p.signature)) {
 
-                    // Skip baseline
-                    if (knownPatients.size > 0 && shouldNotify(p.triage)) {
+                    if (knownPatients.size > 0) {
                         beep.play().catch(()=>{});
 
                         sendTelegram(
@@ -190,7 +211,7 @@
                             `New patient registered\n` +
                             `Time: ${new Date().toLocaleString()}\n` +
                             `Name: ${p.name}\n` +
-                            `NRIC: ${p.nric}\n` +
+                            `ID: ${p.id}\n` +
                             `Triage Category : ${p.triage}`
                         );
                     }
