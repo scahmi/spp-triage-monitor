@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SPP Triage Monitor
 // @namespace    https://github.com/scahmi/spp-triage-monitor
-// @version      1.0.2
+// @version      1.0.3
 // @description  Auto monitor SPP triage, reset polling, Telegram alerts
 // @author       ETD HPG
 // @match        https://hpgspp.emrai.my/spp/*
@@ -32,21 +32,21 @@
         Notification.requestPermission();
     }
 
-    // ===== STATUS PANEL (BOTTOM LEFT) =====
+    // ===== STATUS BAR (BOTTOM LEFT, SYSTEM FONT) =====
     let statusBox;
 
     function formatDate(d) {
         const pad = n => n.toString().padStart(2, "0");
-        return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear().toString().slice(-2)} ` +
+        return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear().toString().slice(-2)} ` +
                `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
 
-    function updateStatus(isRunning, lastUpdate = null) {
+    function updateStatus(isRunning, lastUpdate = "-") {
         if (!statusBox) return;
 
         statusBox.innerHTML = `
-            <b>Monitoring Status:</b> ${isRunning ? "Monitoring" : "Not monitoring"}<br>
-            <b>Last Update:</b> ${lastUpdate || "-"}
+            <div><strong>Monitoring Status:</strong> ${isRunning ? "Monitoring" : "Not monitoring"}</div>
+            <div><strong>Last Update:</strong> ${lastUpdate}</div>
         `;
     }
 
@@ -58,13 +58,24 @@
             left: "20px",
             zIndex: "999999",
             padding: "10px 14px",
-            background: "#f8f9fa",
-            color: "#333",
-            border: "1px solid #ccc",
+            background: "#ffffff",
+            color: "#222",
+            border: "1px solid rgba(0,0,0,0.12)",
             borderRadius: "8px",
             fontSize: "13px",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
-            minWidth: "220px"
+            lineHeight: "1.4",
+            minWidth: "230px",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+            fontFamily: `
+                system-ui,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Roboto,
+                Helvetica,
+                Arial,
+                sans-serif
+            `
         });
 
         document.body.appendChild(statusBox);
@@ -108,7 +119,6 @@
 
     // ===== ALERT WHEN NEW PATIENT =====
     function alertNewPatient(newCount) {
-
         beep.play().catch(() => {});
 
         if (Notification.permission === "granted") {
@@ -136,7 +146,7 @@
         }, 10000);
     }
 
-    // ===== MAIN MONITOR FUNCTION =====
+    // ===== MAIN MONITOR LOOP =====
     function monitor() {
         if (!running) {
             updateStatus(false);
