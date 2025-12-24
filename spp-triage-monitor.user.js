@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         SPP Triage Monitor
 // @namespace    https://github.com/scahmi/spp-triage-monitor
-// @version      1.0.1
+// @version      1.0.2
 // @description  Auto monitor SPP triage, reset polling, Telegram alerts
-// @author       scahmi-ETDHPG
+// @author       ETD HPG
 // @match        https://hpgspp.emrai.my/spp/*
 // @grant        GM_xmlhttpRequest
 // @updateURL    https://raw.githubusercontent.com/scahmi/spp-triage-monitor/main/spp-triage-monitor.user.js
@@ -20,7 +20,7 @@
     let oldCount = null;
     let running = true;
 
-    // ===== TELEGRAM (PUT YOUR NEW TOKEN HERE) =====
+    // ===== TELEGRAM =====
     const TELEGRAM_BOT_TOKEN = "8551613313:AAHDkj9A0V6iLFsoQ0yJzLBh1Cgac-7tTts";
     const TELEGRAM_CHAT_ID  = "-1003658002044";
 
@@ -30,6 +30,45 @@
     // ===== REQUEST NOTIFICATION PERMISSION =====
     if (Notification.permission !== "granted") {
         Notification.requestPermission();
+    }
+
+    // ===== STATUS PANEL (BOTTOM LEFT) =====
+    let statusBox;
+
+    function formatDate(d) {
+        const pad = n => n.toString().padStart(2, "0");
+        return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear().toString().slice(-2)} ` +
+               `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function updateStatus(isRunning, lastUpdate = null) {
+        if (!statusBox) return;
+
+        statusBox.innerHTML = `
+            <b>Monitoring Status:</b> ${isRunning ? "Monitoring" : "Not monitoring"}<br>
+            <b>Last Update:</b> ${lastUpdate || "-"}
+        `;
+    }
+
+    function createStatusBox() {
+        statusBox = document.createElement("div");
+        Object.assign(statusBox.style, {
+            position: "fixed",
+            bottom: "20px",
+            left: "20px",
+            zIndex: "999999",
+            padding: "10px 14px",
+            background: "#f8f9fa",
+            color: "#333",
+            border: "1px solid #ccc",
+            borderRadius: "8px",
+            fontSize: "13px",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+            minWidth: "220px"
+        });
+
+        document.body.appendChild(statusBox);
+        updateStatus(true, "-");
     }
 
     // ===== TELEGRAM SEND FUNCTION =====
@@ -45,7 +84,7 @@
         });
     }
 
-    // ===== WAIT FOR RESET BUTTON (VAADIN SAFE) =====
+    // ===== WAIT FOR RESET BUTTON =====
     function waitForReset(cb) {
         const t = setInterval(() => {
             const btn = document.getElementById("Reset");
@@ -54,35 +93,6 @@
                 cb();
             }
         }, 500);
-    }
-
-    // ===== INSERT STOP BUTTON =====
-    function insertStopButton() {
-        const stopBtn = document.createElement("button");
-        stopBtn.innerText = "🛑 STOP MONITORING";
-        Object.assign(stopBtn.style, {
-            position: "fixed",
-            bottom: "20px",
-            right: "20px",
-            padding: "12px 18px",
-            zIndex: "999999",
-            background: "#d9534f",
-            color: "white",
-            fontSize: "16px",
-            border: "none",
-            borderRadius: "8px",
-            cursor: "pointer",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
-        });
-
-        document.body.appendChild(stopBtn);
-
-        stopBtn.onclick = () => {
-            running = false;
-            stopBtn.innerText = "⛔ MONITORING STOPPED";
-            stopBtn.style.background = "#777";
-            console.log("🛑 Monitoring stopped by user.");
-        };
     }
 
     // ===== CLICK RESET BUTTON =====
@@ -99,17 +109,14 @@
     // ===== ALERT WHEN NEW PATIENT =====
     function alertNewPatient(newCount) {
 
-        // Sound
         beep.play().catch(() => {});
 
-        // Desktop notification
         if (Notification.permission === "granted") {
             new Notification("⚠️ New Patient Registered", {
                 body: "A new patient has appeared in the triage list."
             });
         }
 
-        // Telegram notification
         sendTelegram(
             `⚠️ SPP TRIAGE ALERT\n` +
             `New patient registered.\n` +
@@ -117,7 +124,6 @@
             `Time: ${new Date().toLocaleString()}`
         );
 
-        // Flash tab title
         let flashing = true;
         const flashInterval = setInterval(() => {
             document.title = flashing ? "⚠️ NEW PATIENT!" : "Triage Dashboard";
@@ -132,21 +138,29 @@
 
     // ===== MAIN MONITOR FUNCTION =====
     function monitor() {
-        if (!running) return;
+        if (!running) {
+            updateStatus(false);
+            return;
+        }
 
         clickResetButton();
 
         setTimeout(() => {
-            if (!running) return;
+            if (!running) {
+                updateStatus(false);
+                return;
+            }
 
             const newCount = getRowCount();
+            const now = formatDate(new Date());
 
             if (oldCount !== null && newCount > oldCount) {
-                console.log("🚨 NEW PATIENT DETECTED");
                 alertNewPatient(newCount);
             }
 
             oldCount = newCount;
+            updateStatus(true, now);
+
         }, updateDelay);
 
         setTimeout(monitor, interval);
@@ -154,8 +168,7 @@
 
     // ===== START =====
     waitForReset(() => {
-        console.log("SPP Reset detected, monitoring started");
-        insertStopButton();
+        createStatusBox();
         monitor();
     });
 
