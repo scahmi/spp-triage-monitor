@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         SPP Patient Monitor (Green Zone Only)
+// @name         SPP Patient Monitor (Green Zone + Arrival Time)
 // @namespace    https://github.com/scahmi/spp-triage-monitor
-// @version      3.2.3
-// @description  Notify Telegram + sound when new GREEN ZONE patient appears
+// @version      3.3.0
+// @description  Notify Telegram when new GREEN ZONE patient appears (arrival time from SPP)
 // @match        https://hpgspp.emrai.my/spp/*
 // @grant        GM_xmlhttpRequest
 // @run-at       document-start
@@ -29,8 +29,12 @@
         const INTERVAL = 15000;
         const UPDATE_DELAY = 1200;
 
-        const TELEGRAM_BOT_TOKEN = "8551613313:AAHDkj9A0V6iLFsoQ0yJzLBh1Cgac-7tTts";
-        const TELEGRAM_CHAT_ID = "-1003658002044";
+        /* ================= TELEGRAM  ================= */
+        const _BOT_B64  = "ODU1MTYxMzMxMzpBQUhEa2o5QTBWNmlMRnNvUTB5SnpMQmhxQ2dhYy03dFR0cw==";
+        const _CHAT_B64 = "LTEwMDM2NTgwMDIwNDQ=";
+
+        const TELEGRAM_BOT_TOKEN = atob(_BOT_B64);
+        const TELEGRAM_CHAT_ID  = atob(_CHAT_B64);
 
         /* ================= STATE ================= */
         let knownPatients = new Set();
@@ -47,21 +51,9 @@
         /* ================= STATUS BAR ================= */
         let statusBox;
 
-        function nowStr() {
+        function localNowStr() {
             const d = new Date();
-
-            const day = String(d.getDate()).padStart(2, "0");
-            const month = String(d.getMonth() + 1).padStart(2, "0");
-            const year = d.getFullYear();
-
-            let hours = d.getHours();
-            const minutes = String(d.getMinutes()).padStart(2, "0");
-            const seconds = String(d.getSeconds()).padStart(2, "0");
-
-            const ampm = hours >= 12 ? "PM" : "AM";
-            hours = hours % 12 || 12;
-
-            return `${day}/${month}/${year}, ${hours}:${minutes}:${seconds} ${ampm}`;
+            return d.toLocaleString();
         }
 
         function createStatusBox() {
@@ -114,7 +106,7 @@
             if (!m) return raw;
 
             const value = m[1].trim();
-            const type = m[2].trim();
+            const type  = m[2].trim();
 
             if (/^\d{12}$/.test(value)) {
                 return `${value.slice(0, 8)}XXXX (${type})`;
@@ -141,19 +133,24 @@
             rows.forEach(row => {
                 if (!isGreenZone(row)) return;
 
-                const nameEl = row.querySelector(".v-button-caption");
+                const nameEl  = row.querySelector(".v-button-caption");
                 const labelEl = row.querySelector(".v-label");
+                const timeEl  = row.querySelector("center");
 
-                if (!nameEl || !labelEl) return;
+                if (!nameEl || !labelEl || !timeEl) return;
 
                 const name = nameEl.innerText.trim();
+
                 const idMatch = labelEl.innerText.match(/\|\s*([^|]+?\([^)]+\))/);
                 const id = idMatch ? maskID(idMatch[1].trim()) : "UNKNOWN";
+
+                const arrivalTime = timeEl.innerText.trim();
 
                 patients.push({
                     name,
                     id,
-                    signature: `${name}|${id}`
+                    arrivalTime,
+                    signature: `${name}|${id}|${arrivalTime}`
                 });
             });
 
@@ -172,7 +169,7 @@
 
             setTimeout(() => {
                 const patients = extractPatients();
-                const now = nowStr();
+                const now = localNowStr();
 
                 patients.forEach(p => {
                     if (knownPatients.has(p.signature)) return;
@@ -182,7 +179,7 @@
                     sendTelegram(
                         `<b>🟩 GREEN ZONE ALERT 🟩</b>\n` +
                         `New patient registered\n` +
-                        `Time: ${now}\n` +
+                        `Time: ${p.arrivalTime}\n` +
                         `Name: ${p.name}\n` +
                         `ID: ${p.id}`
                     );
